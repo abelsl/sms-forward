@@ -32,20 +32,83 @@ export const syncTransactionToServer = async (
       }
     }
 
-    console.log("[API Sync] Sending transaction:", payload.transaction_id);
+    const response = await fetch(currentApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    // console.log("[API Sync] Server response tatus:", response);
+    // 1. Safety Check: If the firewall blocks it with a 4xx/5xx, catch it immediately
+    if (!response.ok) return false;
+    // 2. The Core Fix: Verify the server actually sent back JSON
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      // console.error('Security wall interception! Received HTML instead of JSON.');
+      return false; // Safely keeps the item in your offline queue
+    }
 
-    const response = await axios.post(
-      currentApiUrl,
-      payload,
-      {
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-
-    console.log("[API Sync] Server response:", response.status);
-    return response.status >= 200 && response.status < 300;
+    // 3. Parse and check your actual API response structure
+    const data = await response.json();
+    return data && data.success === true;
+  
+    
   } catch (error: any) {
     console.log("[API Sync] Sync failed:", error?.message || error);
+    return false;
+  }
+};
+
+// Batch sync function for multiple transactions at once
+export const syncTransactionsToServer = async (
+  payloads: TransactionPayload[]
+): Promise<boolean> => {
+  try {
+    // Ensure API URL is available
+    if (!currentApiUrl) {
+      const savedUrl = await AsyncStorage.getItem(STORAGE_KEY);
+      if (savedUrl) {
+        currentApiUrl = savedUrl;
+      } else {
+        console.log("[API Sync] Aborted: No server URL configured.");
+        return false;
+      }
+    }
+
+    if (!payloads || payloads.length === 0) {
+      console.log("[API Sync] No multiple transactions to sync.");
+      return true;
+    }
+
+    console.log(
+      `[API Sync] Sending batch of ${payloads.length} transactions`
+    );
+
+    const response = await fetch(currentApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payloads),
+    });
+
+    // console.log("[API Sync] Server response:", response.status);
+     // 1. Safety Check: If the firewall blocks it with a 4xx/5xx, catch it immediately
+    if (!response.ok) return false;
+    // 2. The Core Fix: Verify the server actually sent back JSON
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      // console.error('Security wall interception! Received HTML instead of JSON.');
+      return false; // Safely keeps the item in your offline queue
+    }
+
+    // 3. Parse and check your actual API response structure
+    const data = await response.json();
+    console.log("[API Sync] Batch sync response data:", data.success);
+    return data && data.success === true;
+  } catch (error: any) {
+    console.log("[API Sync] Batch sync failed:", error?.message || error);
     return false;
   }
 };

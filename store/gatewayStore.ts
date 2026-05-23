@@ -1,6 +1,6 @@
 // src/store/gatewayStore.ts
 import { create } from 'zustand';
-import { syncTransactionToServer } from '../services/apiSync';
+import { syncTransactionsToServer, syncTransactionToServer } from '../services/apiSync';
 import { QueueItem, TransactionPayload } from '../types';
 // Safe wrapper: Uses real MMKV on Dev A's native build, or memory fallback in your Expo Go sandbox
 let storage: { getString: (k: string) => string | null; set: (k: string, v: string) => void };
@@ -26,8 +26,11 @@ interface GatewayState {
   manualSyncQueue: () => Promise<void>;
   clearSyncedHistory: () => void;
   retrySyncQueue: (itemId: string) => Promise<boolean>;
+  // this doesn't call manualsunc queue or it done't auto sycn so do that manually for past sync history
+  addMultipleTransactionsToQueue: (tx: TransactionPayload[]) =>  Promise<boolean>; 
+  manualBatchSyncQueue: () =>  Promise<boolean>;
+  addTransactionToQueueWithoutSync: (tx: TransactionPayload[]) => void;
 }
-
 const getStoredQueue = (): QueueItem[] => {
   // 1. MMKV gets strings instantly without waiting
   const raw = storage.getString("gateway_queue");
@@ -36,6 +39,7 @@ const getStoredQueue = (): QueueItem[] => {
 };
 
 export const useGatewayStore = create<GatewayState>((set, get) => ({
+
   isListening: false,
   isSyncing: false,
   queue: getStoredQueue(),
@@ -43,7 +47,54 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
 
   setListeningStatus: (status) => set({ isListening: status }),
   // setListeningStatus: (status) => set({ isListening: true }),
-
+  addTransactionToQueueWithoutSync: (txArray) => {
+    const currentQueue = get().queue;
+    const newItems: QueueItem[] = [];
+    for (const tx of txArray) {
+      if (!currentQueue.some(item => item.payload.transaction_id === tx.transaction_id)) {
+        newItems.push({
+          id: `${Date.now()}_${tx.transaction_id}`,
+          status: 'pending',
+          attempts: 0,
+          payload: tx,
+        });
+      }
+    }
+    const updatedQueue = [...newItems, ...currentQueue];
+    set({ queue: updatedQueue });
+    storage.set('gateway_queue', JSON.stringify(updatedQueue));
+    // set({isSyncing: false})
+     
+  },
+  addMultipleTransactionsToQueue:  async (txArray) => {
+    const currentQueue = get().queue;
+    const newItems: QueueItem[] = [];
+    for (const tx of txArray) {
+      if (!currentQueue.some(item => item.payload.transaction_id === tx.transaction_id)) {
+        newItems.push({
+          id: `${Date.now()}_${tx.transaction_id}`,
+          status: 'pending',
+          attempts: 0,
+          payload: tx,
+        });
+      }
+    }
+    const updatedQueue = [...newItems, ...currentQueue];
+    set({ queue: updatedQueue });
+    storage.set('gateway_queue', JSON.stringify(updatedQueue));
+    set({isSyncing: false})
+  
+     // Get fresh function reference
+  const manualBatchSyncQueue =  await get().manualBatchSyncQueue;
+  console.log("isSyncing:", get().isSyncing);
+  if (get().isListening && manualBatchSyncQueue) {
+    return await manualBatchSyncQueue();
+    // return success? true : false;
+  } else {
+    console.log("Not auto-syncing after adding multiple transactions. isListening:", get().isListening, "manualBatchSyncQueue exists:", !!manualBatchSyncQueue);
+    return false;
+  }
+  },
 
   addTransactionToQueue: async (tx) => {
     const currentQueue = get().queue;
@@ -67,52 +118,15 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
       get().manualSyncQueue(); // Auto-sync attempt on new transaction if we're actively listening
     }
   },
-
-  // manualSyncQueue: async () => {
-  //   if (get().isSyncing) return;
-  //   set({ isSyncing: true });
-
-  //   let activeQueue = [...get().queue];
-  //   let madeChanges = false;
-  //   let syncTimestamp: string | null = null;
-
-  //   for (let item of activeQueue) {
-  //     if (item.status === 'pending') {
-  //       item.attempts += 1;
-  //       const success = await syncTransactionToServer(item.payload);
-
-  //       if (success) {
-  //         item.status = 'synced';
-  //         madeChanges = true;
-  //         syncTimestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  //       } else {
-  //         madeChanges = true;
-  //         break; // Stop loop on failure to preserve queue ordering [cite: 6]
-  //       }
-  //     }
-  //   }
-
-
-  //   if (madeChanges) {
-  //     set({ queue: activeQueue });
-  //     storage.set('gateway_queue', JSON.stringify(activeQueue));
-  //     if (syncTimestamp) {
-  //       set({ lastSuccessfulSync: syncTimestamp });
-  //       storage.set('last_sync_time', syncTimestamp);
-  //     }
-  //   }
-
-  //   set({ isSyncing: false });
-  // },
   manualSyncQueue: async () => {
     if (get().isSyncing) return;
 
     set({ isSyncing: true });
 
     try {
-      const currentQueue = [...get().queue];
+      const currentQueue = get().queue;
+      
       const updatedQueue: QueueItem[] = [];
-
       let syncTimestamp: string | null = null;
 
       for (const item of currentQueue) {
@@ -121,6 +135,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
           item.status !== 'pending' &&
           item.status !== 'failed'
         ) {
+          console.log(`Skipping item ${item.id} with status ${item.status}`);
           continue;
         }
 
@@ -132,7 +147,8 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
         const success = await syncTransactionToServer(
           updatedItem.payload
         );
-
+        console.log("in manualSyncQueue",success)
+        
         if (success) {
           syncTimestamp = new Date()
             .toISOString()
@@ -142,17 +158,22 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
           // DO NOT PUSH synced items
           // this removes them from queue automatically
         } else {
-          updatedQueue.push({
-            ...updatedItem,
-            status: 'pending',
-          });
+        if (currentQueue.some(item => item.payload.transaction_id === updatedItem.payload.transaction_id))  {
+          return; // Prevent duplication
+        } 
+        console.log(`Sync failed for item ${item.id} on attempt ${updatedItem.id}`);
+        updatedQueue.push({
+          ...updatedItem,
+          status: 'pending',
+        
+        })
 
-          break;
-        }
+        break;
       }
-
+      }
+      
       // keep only failed/pending items
-      set({ queue: updatedQueue });
+      set({ queue: [ ...updatedQueue] });
 
       storage.set(
         'gateway_queue',
@@ -166,10 +187,58 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
           'last_sync_time',
           syncTimestamp
         );
+       
       }
     } finally {
       set({ isSyncing: false });
     }
+  },
+  manualBatchSyncQueue: async () => {
+    if (get().isSyncing) {
+      console.log("[Manual Batch Sync] Sync already in progress. Please wait.");
+      return false;
+    }
+
+    set({ isSyncing: true });
+
+    try{
+      const currentQueue = [...get().queue];
+      const pendingItems = currentQueue.filter(item => item.status === 'pending');  
+      if(pendingItems.length === 0) {
+        console.log("[Batch Sync] No pending transactions to sync.");
+        return false;
+      }
+      const payloads = pendingItems.map(item => item.payload);
+
+      const success = await syncTransactionsToServer(payloads);
+      if(success) {
+        const syncTimestamp = new Date()
+          .toISOString()
+          .replace('T', ' ')
+          .substring(0, 19);
+        set({ lastSuccessfulSync: syncTimestamp });
+
+        storage.set(
+          'last_sync_time',
+          syncTimestamp
+        );
+        // Remove all successfully synced items from the queue
+        const updatedQueue = currentQueue.filter(item => item.status !== 'pending');
+        set({ queue: updatedQueue });
+        storage.set(
+          'gateway_queue',
+          JSON.stringify(updatedQueue)
+        );
+        return true;
+      } else {
+        console.log("[Batch Sync] Batch sync failed. Retaining all pending transactions for retry.");
+        return false;
+      }
+    }catch(e){
+      console.log("Batch sync failed:", e);
+      return false;
+    }
+    
   },
   retrySyncQueue: async (itemId: string): Promise<boolean> => {
     if (get().isSyncing) return false;
@@ -193,7 +262,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
       const success = await syncTransactionToServer(
         updatedItem.payload
       );
-
+      // console.log(success)
       if (success) {
         // remove item from queue on success
         const updatedQueue: QueueItem[] =
@@ -205,7 +274,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
           .substring(0, 19);
 
         set({
-          queue: updatedQueue,
+          queue: [ ...updatedQueue],
           lastSuccessfulSync: syncTimestamp,
         });
 
@@ -233,7 +302,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
             : q
         );
 
-      set({ queue: updatedQueue });
+      set({ queue: [ ...updatedQueue] });
 
       storage.set(
         'gateway_queue',

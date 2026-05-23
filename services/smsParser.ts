@@ -21,7 +21,7 @@ const formatTimestamp = (dateStr: string): string => {
 export const parseSMS = (sender: string, rawMessage: string): TransactionPayload | null => {
   // Completely safe string cleaning to wipe away hidden chat app markers/non-breaking spaces
   const cleanSender = sender.toLowerCase().trim();
-  console.log("Parsed Sender [clean sender]:", cleanSender);
+  // console.log("Parsed Sender [clean sender]:", cleanSender);
 
   // 1. DYNAMIC SOURCE IDENTIFICATION 
   // Prevents the gateway phone number from locking into Telebirr if it's a CBE text
@@ -42,7 +42,7 @@ export const parseSMS = (sender: string, rawMessage: string): TransactionPayload
     // Captures both outgoing "transferred ETB 60.00" or incoming "received ETB 50.00"
     const amountMatch = rawMessage.match(/(?:transferred|received|credited|amt:?)\s*ETB\s*([\d,]+\.\d{2})/i);
     // Captures recipient or sender name cleanly up to the phone payload or date break
-    const contactMatch = rawMessage.match( /(?:Credited with ETB\s+[\d.,]+\s+from|from)\s+(.+?)(?:,?\s+on|\s+at|\s+Ref|\s+Current Balance|$)/i);
+    const contactMatch = rawMessage.match( /(?:Credited with ETB\s+[\d.,]+\s+from|from)\s+([A-Z\s\W\d_]+?)(?=\s*\(?\+?251|$)/i);
     const dateMatch = rawMessage.match(/on\s+(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2})/i);
     const balanceMatch = rawMessage.match(/(?:balance is\s+ETB\s+)([\d,]+\.\d{2})/i);
     // Dynamic URL extraction targeting the transactional receipt domain

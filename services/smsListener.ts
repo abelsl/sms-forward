@@ -44,7 +44,7 @@ export const requestSMSPermissions =
         );
         
 
-console.log("Permissions:", granted);
+// console.log("Permissions:", granted);
         return true;
       } else {
         console.warn(
@@ -75,7 +75,7 @@ export const startSMSGatewayListener =
 
     // AppRegistry.startHeadlessTask("sms-forward", () => ParseIncomingSMS);
     
-    console.log()
+    // console.log()
 
     const subscription =
       SmsListener.addListener(

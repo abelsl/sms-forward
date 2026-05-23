@@ -27,6 +27,8 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { get24hrsSmsCount, syncPast24HoursSms } from '@/services/pastSyncHistory';
+import { SyncModal } from '@/components/SyncModal';
 
 
 
@@ -34,7 +36,13 @@ const STORAGE_KEY = '@birr_gateway_server_url';
 
 export default function HomeScreen() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "synced" | "raw_logs">("dashboard");
-
+  const [startModalVisible, setStartModalVisible] = useState(false);
+  // console.log("Number of messages from yeaserday", get24hrsSmsCount());
+  const hr = async () => {
+    const count = await get24hrsSmsCount();
+    console.log("Number of messages from yeaserday", count);
+  }
+  // hr();
   // --- PERSISTENCE & MODAL STATES ---
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [serverUrlInput, setServerUrlInput] = useState("");
@@ -68,6 +76,39 @@ export default function HomeScreen() {
       <Text style={styles.emptyTextSub}>No financial alerts waiting in local database memory.</Text>
     </View>
   );
+
+
+  const [syncProgress, setSyncProgress] = useState();
+
+  // useEffect(() => {
+  //   // let intervalId: NodeJS.Timeout;
+  //   // if (syncProgress.isRunning) {
+  //   //   intervalId = setInterval(() => {
+  //   //     setSyncProgress(getHistoricalSyncStatus());
+  //   //   }, 1000);
+  //   }
+  //   return () => {
+  //     if (intervalId) clearInterval(intervalId);
+  //   };
+  // }, [syncProgress.isRunning]);
+ 
+  const handleStartSync = async () => {
+    // setSyncProgress(getHistoricalSyncStatus());
+    // startHistoricalSmsSync();
+    // setSyncProgress(prev => ({ ...prev, isRunning: true }));
+    await syncPast24HoursSms();
+    Alert.alert("Sync Complete", "All transactions from yesterday till now have been synced.");
+  };
+
+  const handleCancelSync = () => {
+    // cancelHistoricalSync();
+    // setSyncProgress(getHistoricalSyncStatus());
+  };
+
+  const handleResetSync = () => {
+    // resetHistoricalSyncState();
+    // setSyncProgress(getHistoricalSyncStatus());
+  };
 
   /**
    * 1. LOAD SAVED URL FROM ASYNCSTORAGE ON BOOT
@@ -153,6 +194,28 @@ export default function HomeScreen() {
     }}
       forgroundListner();
   }, [isListening]);
+    const handleSyncALL = async () => { 
+      if (pendingItems.length === 0) {
+        Alert.alert("No pending transactions", "There are no pending transactions to sync.");
+        return;
+      }
+      try {
+        const payloads = pendingItems.map(item => item.payload);
+       const  success = await useGatewayStore.getState().addMultipleTransactionsToQueue(payloads);
+      //  console.log("Batch sync result INDEX|||||:", success);
+        if (success) {
+          Alert.alert("Sync Complete", "All pending transactions have been synced.");
+        
+      }  else {
+          Alert.alert("Sync Failed", "An error occurred while syncing transactions. Please try again.");
+      }
+      }catch(e){
+          // Alert.alert("Sync Complete", "All pending transactions have been synced.");
+          Alert.alert("Sync Failed", "An error occurred while syncing transactions. Please try again.");
+            console.log("Batch sync failed:", e);
+      }
+ }
+      
 
   const copyToClipboard = (text: string) => {
     Clipboard.setString(text);
@@ -171,7 +234,11 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#020617" />
-
+        <SyncModal  
+          isModalVisible={startModalVisible} 
+          setStartModalVisible={setStartModalVisible} 
+          pendingItems={pendingItems}
+        />
       {/* REUSABLE CONFIGURATION OVERLAY CARD */}
       <Modal visible={isModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -217,6 +284,7 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
+
       <View style={styles.mainWrapper}>
         {/* HEADER SECTION */}
         <View style={styles.headerRow}>
@@ -254,6 +322,59 @@ export default function HomeScreen() {
           <View style={styles.statBox}>
             <Text style={styles.statLabel}>UNSYNCED</Text>
             <Text style={styles.statValue}>{pendingItems.length}</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statLabel}></Text>
+             <TouchableOpacity 
+                style={[styles.histBtn, styles.histBtnDanger]} 
+                onPress={handleSyncALL}
+              >
+                <Text style={styles.histBtnText}>⟳ Push ALL</Text>
+              </TouchableOpacity>
+          </View>
+        </View>
+         {/* HISTORICAL SYNC CONTROLS */}
+        <View style={styles.historicalCard}>
+          <Text style={styles.historicalTitle}>SMS SYNC Starting from Yesterday</Text>
+          
+          <View style={styles.historicalStatsGrid}>
+            {/* <View style={styles.historicalStatBox}>
+              <Text style={styles.historicalStatLabel}>SCANNED</Text>
+              <Text style={styles.historicalStatValue}>{syncProgress}</Text>
+            </View>
+            <View style={styles.historicalStatBox}>
+              <Text style={styles.historicalStatLabel}>QUEUED</Text>
+              <Text style={styles.historicalStatValue}>{syncProgress}</Text>
+            </View>
+            <View style={styles.historicalStatBox}>
+              <Text style={styles.historicalStatLabel}>SKIPPED</Text>
+              <Text style={styles.historicalStatValue}>{syncProgress}</Text>
+            </View>
+            <View style={styles.historicalStatBox}>
+              <Text style={styles.historicalStatLabel}>FAILED</Text>
+              <Text style={styles.historicalStatValueError}>{syncProgress}</Text>
+            </View> */}
+          </View>
+
+          <View style={styles.historicalActionRow}>
+           
+              <TouchableOpacity 
+                style={[styles.histBtn, styles.histBtnPrimary]} 
+                // onPress={handleStartSync}
+                onPress={()=> setStartModalVisible(true)}
+                // props={{ pendingItems , handleSyncALL, setStartModalVisible, isModalVisible,}}
+              
+              >
+                <Text style={styles.histBtnText}>🔄 START SYNC</Text>
+              </TouchableOpacity>
+            
+            {/* <TouchableOpacity 
+              style={[styles.histBtn, styles.histBtnSecondary, syncProgress && { opacity: 0.5 }]} 
+              onPress={handleResetSync}
+              disabled={syncProgress}
+            >
+              <Text style={styles.histBtnTextSecondary}>RESET</Text>
+            </TouchableOpacity> */}
           </View>
         </View>
 
@@ -359,6 +480,21 @@ const styles = StyleSheet.create({
   emptyState: { flex: 1, paddingVertical: 80, alignItems: 'center', justifyContent: 'center' },
   emptyTextMain: { color: '#475569', fontSize: 14, fontWeight: '600' },
   emptyTextSub: { color: '#334155', fontSize: 12, marginTop: 4, textAlign: 'center' },
+  // HISTORICAL SYNC
+  historicalCard: { backgroundColor: '#0f172a', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b', marginBottom: 16 },
+  historicalTitle: { color: '#ffffff', fontSize: 13, fontWeight: '900', letterSpacing: 0.5, marginBottom: 12 },
+  historicalStatsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  historicalStatBox: { flex: 1, minWidth: '22%', backgroundColor: '#020617', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#1e293b' },
+  historicalStatLabel: { color: '#64748b', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
+  historicalStatValue: { fontSize: 16, fontWeight: '800', color: '#cbd5e1', marginTop: 4 },
+  historicalStatValueError: { fontSize: 16, fontWeight: '800', color: '#f43f5e', marginTop: 4 },
+  historicalActionRow: { flexDirection: 'row', gap: 12 },
+  histBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8 },
+  histBtnPrimary: { backgroundColor: '#4f46e5' },
+  histBtnDanger: { backgroundColor: 'rgba(244, 63, 94, 0.1)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.3)' },
+  histBtnSecondary: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#334155' },
+  histBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  histBtnTextSecondary: { color: '#94a3b8', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
 });
 
 
