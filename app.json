@@ -4,7 +4,7 @@
     "slug": "sms-forward",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/smsForward.png",
     "scheme": "smsforward",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -12,6 +12,15 @@
       "supportsTablet": true
     },
     "android": {
+      "permissions": [
+          "RECEIVE_SMS",
+          "READ_SMS",
+          "RECEIVE_BOOT_COMPLETED",
+          "WAKE_LOCK",
+          "FOREGROUND_SERVICE",
+          "FOREGROUND_SERVICE_DATA_SYNC",
+          "INTERNET"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -19,7 +28,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.abelsl22.smsforward"
     },
     "web": {
       "output": "static",
@@ -43,6 +53,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "3b43be7b-79b5-43d1-9c32-947f7bf85858"
+      }
     }
   }
 }
