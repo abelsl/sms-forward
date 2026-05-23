@@ -22,7 +22,7 @@ interface GatewayState {
   queue: QueueItem[];
   lastSuccessfulSync: string | null;
   setListeningStatus: (status: boolean) => void;
-  addTransactionToQueue: (tx: TransactionPayload) => void;
+  addTransactionToQueue: (tx: TransactionPayload, skipAutoSync?: boolean) => void;
   manualSyncQueue: () => Promise<void>;
   clearSyncedHistory: () => void;
   retrySyncQueue: (itemId: string) => Promise<boolean>;
@@ -35,6 +35,21 @@ const getStoredQueue = (): QueueItem[] => {
   return raw ? (JSON.parse(raw) as QueueItem[]) : [];
 };
 
+const getSyncedTransactionIds = (): Set<string> => {
+  const raw = storage.getString("synced_transaction_ids");
+  if (!raw) return new Set<string>();
+  try {
+    const arr = JSON.parse(raw);
+    return new Set<string>(Array.isArray(arr) ? arr : []);
+  } catch (e) {
+    return new Set<string>();
+  }
+};
+
+const saveSyncedTransactionIds = (ids: Set<string>): void => {
+  storage.set("synced_transaction_ids", JSON.stringify(Array.from(ids)));
+};
+
 export const useGatewayStore = create<GatewayState>((set, get) => ({
   isListening: false,
   isSyncing: false,
@@ -45,11 +60,16 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
   // setListeningStatus: (status) => set({ isListening: true }),
 
 
-  addTransactionToQueue: async (tx) => {
+  addTransactionToQueue: async (tx, skipAutoSync = false) => {
     const currentQueue = get().queue;
 
     if (currentQueue.some(item => item.payload.transaction_id === tx.transaction_id)) {
       return; // Prevent duplication
+    }
+
+    const syncedIds = getSyncedTransactionIds();
+    if (syncedIds.has(tx.transaction_id)) {
+      return; // Prevent duplication against historical synced set
     }
 
     const newItem: QueueItem = {
@@ -63,7 +83,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
     set({ queue: updatedQueue });
     storage.set('gateway_queue', JSON.stringify(updatedQueue));
 
-    if (get().isListening) {
+    if (get().isListening && !skipAutoSync) {
       get().manualSyncQueue(); // Auto-sync attempt on new transaction if we're actively listening
     }
   },
@@ -114,6 +134,8 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
       const updatedQueue: QueueItem[] = [];
 
       let syncTimestamp: string | null = null;
+      let syncedIdsAdded = false;
+      const syncedIds = getSyncedTransactionIds();
 
       for (const item of currentQueue) {
         // only sync pending or failed
@@ -139,6 +161,9 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
             .replace('T', ' ')
             .substring(0, 19);
 
+          syncedIds.add(item.payload.transaction_id);
+          syncedIdsAdded = true;
+
           // DO NOT PUSH synced items
           // this removes them from queue automatically
         } else {
@@ -149,6 +174,10 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
 
           break;
         }
+      }
+
+      if (syncedIdsAdded) {
+        saveSyncedTransactionIds(syncedIds);
       }
 
       // keep only failed/pending items
@@ -203,6 +232,10 @@ export const useGatewayStore = create<GatewayState>((set, get) => ({
           .toISOString()
           .replace('T', ' ')
           .substring(0, 19);
+
+        const syncedIds = getSyncedTransactionIds();
+        syncedIds.add(item.payload.transaction_id);
+        saveSyncedTransactionIds(syncedIds);
 
         set({
           queue: updatedQueue,

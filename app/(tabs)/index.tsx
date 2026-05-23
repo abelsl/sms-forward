@@ -4,6 +4,7 @@ import { setServerUrl } from '@/services/apiSync';
 import { requestSMSPermissions, startSMSGatewayListener } from '@/services/smsListener';
 import { useGatewayStore } from '@/store/gatewayStore';
 import { QueueItem } from '@/types';
+import { startHistoricalSmsSync, getHistoricalSyncStatus, resetHistoricalSyncState, cancelHistoricalSync, SyncProgress } from '@/services/historicalSmsSync';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -53,6 +54,36 @@ export default function HomeScreen() {
 
   const { isListening, queue, setListeningStatus } = useGatewayStore();
   const pendingItems = queue.filter((item: any) => item.status === "pending");
+
+  const [syncProgress, setSyncProgress] = useState<SyncProgress>(getHistoricalSyncStatus());
+
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+    if (syncProgress.isRunning) {
+      intervalId = setInterval(() => {
+        setSyncProgress(getHistoricalSyncStatus());
+      }, 1000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [syncProgress.isRunning]);
+
+  const handleStartSync = () => {
+    setSyncProgress(getHistoricalSyncStatus());
+    startHistoricalSmsSync();
+    setSyncProgress(prev => ({ ...prev, isRunning: true }));
+  };
+
+  const handleCancelSync = () => {
+    cancelHistoricalSync();
+    setSyncProgress(getHistoricalSyncStatus());
+  };
+
+  const handleResetSync = () => {
+    resetHistoricalSyncState();
+    setSyncProgress(getHistoricalSyncStatus());
+  };
 
   const handleToast = useCallback((message: string, type: 'success' | 'error') => {
     showToast(message, type);
@@ -257,6 +288,55 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* HISTORICAL SYNC CONTROLS */}
+        <View style={styles.historicalCard}>
+          <Text style={styles.historicalTitle}>HISTORICAL SMS SYNC</Text>
+          
+          <View style={styles.historicalStatsGrid}>
+            <View style={styles.historicalStatBox}>
+              <Text style={styles.historicalStatLabel}>SCANNED</Text>
+              <Text style={styles.historicalStatValue}>{syncProgress.totalScanned}</Text>
+            </View>
+            <View style={styles.historicalStatBox}>
+              <Text style={styles.historicalStatLabel}>QUEUED</Text>
+              <Text style={styles.historicalStatValue}>{syncProgress.totalQueued}</Text>
+            </View>
+            <View style={styles.historicalStatBox}>
+              <Text style={styles.historicalStatLabel}>SKIPPED</Text>
+              <Text style={styles.historicalStatValue}>{syncProgress.duplicatesSkipped}</Text>
+            </View>
+            <View style={styles.historicalStatBox}>
+              <Text style={styles.historicalStatLabel}>FAILED</Text>
+              <Text style={styles.historicalStatValueError}>{syncProgress.failedParses}</Text>
+            </View>
+          </View>
+
+          <View style={styles.historicalActionRow}>
+            {!syncProgress.isRunning ? (
+              <TouchableOpacity 
+                style={[styles.histBtn, styles.histBtnPrimary]} 
+                onPress={handleStartSync}
+              >
+                <Text style={styles.histBtnText}>▶ START SYNC</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity 
+                style={[styles.histBtn, styles.histBtnDanger]} 
+                onPress={handleCancelSync}
+              >
+                <Text style={styles.histBtnText}>■ CANCEL</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity 
+              style={[styles.histBtn, styles.histBtnSecondary, syncProgress.isRunning && { opacity: 0.5 }]} 
+              onPress={handleResetSync}
+              disabled={syncProgress.isRunning}
+            >
+              <Text style={styles.histBtnTextSecondary}>RESET</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* CONTROLS TABS */}
         <View style={styles.tabContainer}>
           <TouchableOpacity
@@ -359,6 +439,22 @@ const styles = StyleSheet.create({
   emptyState: { flex: 1, paddingVertical: 80, alignItems: 'center', justifyContent: 'center' },
   emptyTextMain: { color: '#475569', fontSize: 14, fontWeight: '600' },
   emptyTextSub: { color: '#334155', fontSize: 12, marginTop: 4, textAlign: 'center' },
+
+  // HISTORICAL SYNC
+  historicalCard: { backgroundColor: '#0f172a', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b', marginBottom: 16 },
+  historicalTitle: { color: '#ffffff', fontSize: 13, fontWeight: '900', letterSpacing: 0.5, marginBottom: 12 },
+  historicalStatsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  historicalStatBox: { flex: 1, minWidth: '22%', backgroundColor: '#020617', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#1e293b' },
+  historicalStatLabel: { color: '#64748b', fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
+  historicalStatValue: { fontSize: 16, fontWeight: '800', color: '#cbd5e1', marginTop: 4 },
+  historicalStatValueError: { fontSize: 16, fontWeight: '800', color: '#f43f5e', marginTop: 4 },
+  historicalActionRow: { flexDirection: 'row', gap: 12 },
+  histBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8 },
+  histBtnPrimary: { backgroundColor: '#4f46e5' },
+  histBtnDanger: { backgroundColor: 'rgba(244, 63, 94, 0.1)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.3)' },
+  histBtnSecondary: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#334155' },
+  histBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  histBtnTextSecondary: { color: '#94a3b8', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
 });
 
 
